@@ -1,0 +1,150 @@
+@inject IJSRuntime JS
+
+@page "/users"
+
+<h3>User Management</h3>
+
+<button class="btn btn-primary" @onclick="ShowAddUserPopup">Add User</button>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Username</th>
+            <th>Email</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var user in users)
+        {
+            <tr>
+                <td>@user.Username</td>
+                <td>@user.Email</td>
+                <td>
+                    <button class="btn btn-warning btn-sm" @onclick="() => ShowEditUserPopup(user)">Edit</button>
+                    <button class="btn btn-danger btn-sm" @onclick="() => ConfirmDeleteUser(user.Id)">Delete</button>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private List<User> users = new List<User>();
+    private User currentUser = new User();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsers();
+    }
+
+    private async Task LoadUsers()
+    {
+        try
+        {
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://user-service");
+            users = await client.GetFromJsonAsync<List<User>>("/users") ?? new List<User>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading users: {ex.Message}");
+        }
+    }
+
+    private async Task ShowAddUserPopup()
+    {
+        var result = await JS.InvokeAsync<User>("showAddEditUserPopup", "Add User", null);
+        if (result != null)
+        {
+            currentUser = result;
+            await SaveUser(false); // false = Add user
+        }
+    }
+
+    private async Task ShowEditUserPopup(User user)
+    {
+        var result = await JS.InvokeAsync<User>("showAddEditUserPopup", "Edit User", user);
+        if (result != null)
+        {
+            currentUser = result;
+            await SaveUser(true); // true = Edit user
+        }
+    }
+
+    private async Task SaveUser(bool isEditing)
+    {
+        try
+        {
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://user-service");
+
+            HttpResponseMessage response;
+            if (isEditing)
+            {
+                response = await client.PutAsJsonAsync($"/users/{currentUser.Username}", currentUser);
+            }
+            else
+            {
+                response = await client.PostAsJsonAsync("/users", currentUser);
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadUsers();
+                await JS.InvokeVoidAsync("showSuccessMessage", "User saved successfully!");
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JS.InvokeVoidAsync("showErrorMessage", $"Failed to save user: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("showErrorMessage", $"Error saving user: {ex.Message}");
+        }
+    }
+
+    private async Task ConfirmDeleteUser(int id)
+    {
+        var isConfirmed = await JS.InvokeAsync<bool>("showDeleteConfirmation");
+        if (isConfirmed)
+        {
+            await DeleteUser(id);
+        }
+    }
+
+    private async Task DeleteUser(int id)
+    {
+        try
+        {
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://user-service");
+            var response = await client.DeleteAsync($"/users/{id}");
+
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadUsers();
+                await JS.InvokeVoidAsync("showSuccessMessage", "User deleted successfully!");
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JS.InvokeVoidAsync("showErrorMessage", $"Failed to delete user: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("showErrorMessage", $"Error deleting user: {ex.Message}");
+        }
+    }
+
+    public class User
+    {
+        public int Id { get; set; }
+        public string Username { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+    }
+}

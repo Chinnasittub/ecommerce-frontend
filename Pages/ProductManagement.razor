@@ -1,0 +1,181 @@
+@inject IJSRuntime JS
+
+@page "/products"
+
+<h3>Product Management</h3>
+
+<button class="btn btn-primary" @onclick="ShowAddProductPopup">Add Product</button>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Price</th>
+            <th>Quantity</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var product in products)
+        {
+            <tr>
+                <td>@product.Name</td>
+                <td>@product.Price</td>
+                <td>@product.Quantity</td>
+                <td>
+                    <button class="btn btn-warning btn-sm" @onclick="() => ShowEditProductPopup(product)">Edit</button>
+                    <button class="btn btn-danger btn-sm" @onclick="() => ConfirmDeleteProduct(product.Id)">Delete</button>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private List<Product> products = new List<Product>();
+    private Product currentProduct = new Product();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProducts();
+    }
+
+    private async Task LoadProducts()
+    {
+        try
+        {
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://product-service");
+            products = await client.GetFromJsonAsync<List<Product>>("/api/product") ?? new List<Product>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading products: {ex.Message}");
+        }
+    }
+
+    private async Task ShowAddProductPopup()
+    {
+        var result = await JS.InvokeAsync<Product>("showAddEditProductPopup", "Add Product", null);
+        if (result == null)
+        {
+            // User closed the modal without saving
+            return;
+        }
+
+        // Clear the ID for new products
+        result.Id = 0;
+
+        if (result.Price > 0 && result.Quantity > 0)
+        {
+            currentProduct = result;
+            await SaveProduct(false); // false = Add product
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("showErrorMessage", "Price and Quantity must be greater than 0.");
+        }
+    }
+
+    private async Task ShowEditProductPopup(Product product)
+    {
+        var result = await JS.InvokeAsync<Product>("showAddEditProductPopup", "Edit Product", product);
+        if (result == null)
+        {
+            // User closed the modal without saving
+            return;
+        }
+
+        if (result.Price > 0 && result.Quantity > 0)
+        {
+            currentProduct = result;
+            await SaveProduct(true); // true = Edit product
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("showErrorMessage", "Price and Quantity must be greater than 0.");
+        }
+    }
+
+    private async Task SaveProduct(bool isEditing)
+    {
+        if (isEditing && currentProduct.Id <= 0)
+        {
+            await JS.InvokeVoidAsync("showErrorMessage", "Invalid product ID.");
+            return;
+        }
+        
+        try
+        {
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://product-service");
+
+            HttpResponseMessage response;
+            if (isEditing)
+            {
+                response = await client.PutAsJsonAsync($"/api/product/{currentProduct.Id}", currentProduct);
+            }
+            else
+            {
+                response = await client.PostAsJsonAsync("/api/product", currentProduct);
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadProducts();
+                await JS.InvokeVoidAsync("showSuccessMessage", "Product saved successfully!");
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JS.InvokeVoidAsync("showErrorMessage", $"Failed to save product: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("showErrorMessage", $"Error saving product: {ex.Message}");
+        }
+    }
+
+    private async Task ConfirmDeleteProduct(int id)
+    {
+        var isConfirmed = await JS.InvokeAsync<bool>("showDeleteConfirmation");
+        if (isConfirmed)
+        {
+            await DeleteProduct(id);
+        }
+    }
+
+    private async Task DeleteProduct(int id)
+    {
+        try
+        {
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://product-service");
+            var response = await client.DeleteAsync($"/api/product/{id}");
+
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadProducts();
+                await JS.InvokeVoidAsync("showSuccessMessage", "Product deleted successfully!");
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JS.InvokeVoidAsync("showErrorMessage", $"Failed to delete product: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("showErrorMessage", $"Error deleting product: {ex.Message}");
+        }
+    }
+
+    public class Product
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public decimal Price { get; set; }
+        public int Quantity { get; set; }
+    }
+}

@@ -1,0 +1,180 @@
+@inject IJSRuntime JS
+
+@page "/orders"
+
+<h3>Order Management</h3>
+
+<button class="btn btn-primary" @onclick="ShowAddOrderPopup">Add Order</button>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Order ID</th>
+            <th>Username</th>
+            <th>Product Name</th>
+            <th>Quantity</th>
+            <th>Order Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var order in orders)
+        {
+            <tr>
+                <td>@order.Id</td>
+                <td>@order.Username</td>
+                <td>@order.ProductName</td>
+                <td>@order.Quantity</td>
+                <td>@order.OrderDate.ToString("yyyy-MM-dd")</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private List<OrderDetailsDto> orders = new List<OrderDetailsDto>();
+    private List<User> users = new List<User>();
+    private List<Product> products = new List<Product>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadOrders();
+        await LoadUsers();
+        await LoadProducts();
+    }
+
+    private async Task LoadOrders()
+    {
+        try
+        {
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://order-service");
+            orders = await client.GetFromJsonAsync<List<OrderDetailsDto>>("/api/order") ?? new List<OrderDetailsDto>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading orders: {ex.Message}");
+        }
+    }
+
+    private async Task LoadUsers()
+    {
+        try
+        {
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://user-service");
+            users = await client.GetFromJsonAsync<List<User>>("/users") ?? new List<User>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading users: {ex.Message}");
+        }
+    }
+
+    private async Task LoadProducts()
+    {
+        try
+        {
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://product-service");
+            products = await client.GetFromJsonAsync<List<Product>>("/api/product") ?? new List<Product>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading products: {ex.Message}");
+        }
+    }
+
+    private async Task ShowAddOrderPopup()
+    {
+        if (users == null || users.Count == 0)
+        {
+            await LoadUsers(); // Try loading users again
+            if (users == null || users.Count == 0)
+            {
+                await JS.InvokeVoidAsync("showErrorMessage", "No users available to select.");
+                return;
+            }
+        }
+
+        if (products == null || products.Count == 0)
+        {
+            await LoadProducts(); // Try loading products again
+            if (products == null || products.Count == 0)
+            {
+                await JS.InvokeVoidAsync("showErrorMessage", "No products available to select.");
+                return;
+            }
+        }
+
+        var result = await JS.InvokeAsync<OrderRequest>("showAddOrderPopup", users, products);
+        // Check if the modal was closed without saving
+        if (result == null)
+        {
+            // User closed the modal, do nothing
+            return;
+        }
+
+        if (result.Quantity > 0)
+        {
+            await SaveOrder(result);
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("showErrorMessage", "Quantity must be greater than 0.");
+        }
+    }
+
+    private async Task SaveOrder(OrderRequest orderRequest)
+    {
+        try
+        {
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://order-service");
+
+            var response = await client.PostAsJsonAsync("/api/order/place-order", orderRequest);
+
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadOrders();
+                await JS.InvokeVoidAsync("showSuccessMessage", "Order placed successfully!");
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JS.InvokeVoidAsync("showErrorMessage", $"Failed to place order: {error}");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("showErrorMessage", $"Error placing order: {ex.Message}");
+        }
+    }
+
+    public class OrderDetailsDto
+    {
+        public int Id { get; set; }
+        public string Username { get; set; } = string.Empty;
+        public string ProductName { get; set; } = string.Empty;
+        public int Quantity { get; set; }
+        public DateTime OrderDate { get; set; }
+    }
+
+    public class OrderRequest
+    {
+        public int UserId { get; set; }
+        public int ProductId { get; set; }
+        public int Quantity { get; set; }
+    }
+
+    public class User
+    {
+        public int Id { get; set; }
+        public string Username { get; set; } = string.Empty;
+    }
+
+    public class Product
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+    }
+}

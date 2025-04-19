@@ -1,0 +1,84 @@
+@page "/register"
+
+<h3>Register</h3>
+<EditForm Model="@user" OnValidSubmit="HandleRegister">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+    <div>
+        <label>Username:</label>
+        <InputText @bind-Value="user.Username" />
+        @if (string.IsNullOrWhiteSpace(user.Username))
+        {
+            <p style="color: red;">Username is required.</p>
+        }
+    </div>
+    <div>
+        <label>Password:</label>
+        <InputText @bind-Value="user.Password" type="password" />
+        @if (string.IsNullOrWhiteSpace(user.Password))
+        {
+            <p style="color: red;">Password is required.</p>
+        }
+    </div>
+    <div>
+        <label>Email:</label>
+        <InputText @bind-Value="user.Email" type="email" />
+        @if (string.IsNullOrWhiteSpace(user.Email))
+        {
+            <p style="color: red;">Email is required.</p>
+        }
+    </div>
+    <button type="submit">Register</button>
+</EditForm>
+
+@if (!string.IsNullOrEmpty(message))
+{
+    <p style="color: green;">@message</p>
+}
+
+@code {
+    private UserModel user = new UserModel();
+    private string message = string.Empty;
+
+    private async Task HandleRegister()
+    {
+        // ตรวจสอบว่าฟิลด์ Username, Password และ Email ไม่ว่างเปล่า
+        if (string.IsNullOrWhiteSpace(user.Username) || string.IsNullOrWhiteSpace(user.Password) || string.IsNullOrWhiteSpace(user.Email))
+        {
+            return; // ไม่ทำอะไรถ้าข้อมูลไม่ครบ
+        }
+
+        try
+        {
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://user-service"); // URL ของ user-service
+
+            var response = await client.PostAsJsonAsync("/users", user);
+
+            if (response.IsSuccessStatusCode)
+            {
+                message = "User registered successfully!";
+                user = new UserModel(); // รีเซ็ตฟอร์ม
+            }
+            else if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                message = "Username already exists.";
+            }
+            else
+            {
+                message = "Failed to register user.";
+            }
+        }
+        catch (Exception ex)
+        {
+            message = $"Error: {ex.Message}";
+        }
+    }
+
+    public class UserModel
+    {
+        public string Username { get; set; }
+        public string Password { get; set; }
+        public string Email { get; set; }
+    }
+}
